@@ -20,19 +20,17 @@ defmodule Troxy do
     # Read response async
     # https://github.com/benoitc/hackney#get-a-response-asynchronously
 
-    # Async response handler which will reply to self
-    {:ok, async_handler_task} = Task.start __MODULE__, :async_response_handler, [conn, self]
+    async_handler_task = Task.async __MODULE__, :async_response_handler, [conn]
 
     hackney_options = [
       {:follow_redirect, true}, # Follow redirects
       {:force_redirect, true},  # Force redirect even on POST
       :async,                   # Async response
-      {:stream_to, async_handler_task} # Async PID handler
+      {:stream_to, async_handler_task.pid} # Async PID handler
     # :insecure                 # Ignore SSL cert validation
     ]
 
     # Streaming the upstream request body
-    {:ok, async_handler_task} = Task.start __MODULE__, :async_response_handler, [conn, self]
     body = :stream
 
     {:ok, hackney_client} = :hackney.request(method, url, headers, body, hackney_options)
@@ -42,7 +40,7 @@ defmodule Troxy do
     |> upstream_chunked_request(hackney_client)
 
     # We dont need the connection, as it was passed to the :stream_to in hackney
-    downstream_chunked_response(hackney_client)
+    downstream_chunked_response(async_handler_task, hackney_client)
   end
 
   # Reads the original request body and writes it to the hackney client recursively
@@ -80,58 +78,49 @@ defmodule Troxy do
     |> send_resp(status, body)
   end
 
-  defp downstream_chunked_response(hackney_client) do
+  defp downstream_chunked_response(async_handler_task, hackney_client) do
     {:ok, _hackney_client} = :hackney.start_response(hackney_client)
-    await_async_response
+    Task.await async_handler_task, :infinity
   end
 
-  # Be careful, this will receive all messages sent
-  # like {:cowboy_req, :resp_sent}, {:plug_conn, :sent}
-  # It will return the conn after the chunks have been sent
-  def await_async_response do
-    receive do
-      {:async_done, conn} ->
-        conn
-      any_msg ->
-        IO.inspect any_msg
-        await_async_response
-    end
-  end
-
-  # Not private function because it is called in another spawned process
-  def async_response_handler(conn, target) do
+  # Not private function because it is called in the async task
+  def async_response_handler(conn) do
     receive do
       {:hackney_response, _hackney_client, {:status, status_code, _reason_phrase}} ->
         Logger.info "Got status code #{status_code}"
 
         conn
         |> put_status(status_code)
-        |> async_response_handler(target)
+        |> async_response_handler
       {:hackney_response, _hackney_client, {:headers, headers}} ->
-        Logger.info "Got headers"
+        Logger.info "Got headers #{inspect headers}"
 
-        %{conn | resp_headers: headers}
+        conn
+        # |> put_resp_headers(headers)
+        |> put_untouched_resp_headers(headers) # Don't downcase them (maybe the client relies on casing)
         # PR: There should be a send_chunk that internally reads the status from the connection if it is already set
         |> send_chunked(conn.status)
-        |> async_response_handler(target)
+        |> async_response_handler
       {:hackney_response, _hackney_client, body_chunk} when is_binary(body_chunk) ->
         Logger.info "Got body chunk"
 
-        Enum.into([body_chunk], conn)
-        |> async_response_handler(target)
+        # Enum.into([body_chunk], conn)
+        {:ok, conn} = chunk(conn, body_chunk)
+
+        conn
+        |> async_response_handler
       {:hackney_response, _hackney_client, :done} ->
         Logger.info "Got everything!"
 
-        send target, {:async_done, conn}
+        conn
     end
   end
 
   defp extract_url(conn) do
     # TODO: Forward port
     # FIX: conn.request_path for https requests is like "yahoo.com:443"
-
-    host = get_req_header conn, "host"
-    base = to_string(conn.scheme) <> "://" <> conn.req_headers["host"] <> conn.request_path
+    host = conn.req_headers["host"]
+    base = to_string(conn.scheme) <> "://" <> host <> conn.request_path
     case conn.query_string do
       "" -> base
       query_string -> base <> "?" <> query_string
@@ -146,6 +135,15 @@ defmodule Troxy do
     |> Map.get(:req_headers)
   end
 
-  defp extract_response_headers(conn) do
+  defp put_resp_headers(conn, []), do: conn
+  defp put_resp_headers(conn, [{header, value}|remaining_headers]) do
+    conn
+    |> put_resp_header(String.downcase(header), value)
+    |> put_resp_headers remaining_headers
   end
+
+  defp put_untouched_resp_headers(conn, headers) do
+    %{conn | resp_headers: headers}
+  end
+
 end

@@ -30,11 +30,11 @@ todo
 Todo
 ----
 
+ - Short circuit self proxy requests
  - Tests
- - Chunked responses
-   - Task.async
  - Blacklisting hosts
  - Caching
+   - We forward headers upstream, so at least we could check those are not expired and reply without sending a request to upstream
  - Generate JSON Schema
  - Web ui
    - Postman/Paw like request creator
