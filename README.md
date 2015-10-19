@@ -30,6 +30,11 @@ todo
 Todo
 ----
 
+  - Callbacks
+   - before_upstream
+   - after_upstream
+   - before_downstream
+   - after_downstream
  - Short circuit self proxy requests
  - Tests
  - Blacklisting hosts

@@ -1,19 +1,34 @@
 defmodule Troxy do
+  @moduledoc """
+  A Plug to proxy requests to an upstream specified in the host header
+
+  Based on Jose Valim's Proxy
+  https://github.com/josevalim/proxy/blob/master/lib/proxy.ex
+
+  ## Usage
+
+      plug Troxy, upstream_handler: &__MODULE__.upstream_handler/1,
+                  downstream_handler: &__MODULE__.downstream_handler/1
+  """
+
+  @behaviour Plug
+
   import Plug.Conn
   require IEx
   require Logger
 
-  # Based on Jose Valim's Proxy
-  # https://github.com/josevalim/proxy/blob/master/lib/proxy.ex
-
   def init(opts) do
-    opts
+    upstream_handler = Keyword.get opts, :upstream_handler, &(&1)
+    downstream_handler = Keyword.get opts, :downstream_handler, &(&1)
+    {upstream_handler, downstream_handler}
   end
 
-  def call(conn, _opts) do
+  def call(conn, {upstream_handler, downstream_handler}) do
     method = conn.method |> String.downcase |> String.to_atom
     url = extract_url(conn)
     headers = extract_request_headers(conn)
+
+    # TODO: Return an error if url is the same as the proxy
 
     Logger.info "> #{method} #{url} #{inspect headers}"
 
@@ -37,10 +52,11 @@ defmodule Troxy do
     Logger.info ">> #{method} #{url}"
 
     conn
+    |> upstream_handler.()
     |> upstream_chunked_request(hackney_client)
 
-    # We dont need the connection, as it was passed to the :stream_to in hackney
     downstream_chunked_response(async_handler_task, hackney_client)
+    |> downstream_handler.()
   end
 
   # Reads the original request body and writes it to the hackney client recursively
