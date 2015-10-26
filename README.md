@@ -69,7 +69,7 @@ Adapters
   - OAuth1
   - OAuth2
 
-
+ - https://getkong.org/plugins/#authentication
 
 Inspired on
 -----------
@@ -77,3 +77,9 @@ Inspired on
  - mitmproxy
  - HTTP clients like Paw
  - ngrok
+
+
+Similar projects
+----
+
+https://github.com/slogsdon/elixir-reverse-proxy

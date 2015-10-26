@@ -29,6 +29,8 @@ defmodule Troxy.Mixfile do
   defp deps do
     [{:cowboy, "~> 1.0"},
      {:plug, "~> 1.0"},
-     {:hackney, "~> 1.1"}]
+     {:hackney, "~> 1.1"},
+
+     {:httparrot, "~> 0.3.4", only: :test}]
   end
 end

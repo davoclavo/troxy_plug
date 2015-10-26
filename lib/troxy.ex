@@ -8,7 +8,8 @@ defmodule Troxy do
   ## Usage
 
       plug Troxy, upstream_handler: &__MODULE__.upstream_handler/1,
-                  downstream_handler: &__MODULE__.downstream_handler/1
+                  downstream_handler: &__MODULE__.downstream_handler/1,
+                  normalize_headers?: true
   """
 
   @behaviour Plug
@@ -18,12 +19,14 @@ defmodule Troxy do
   require Logger
 
   def init(opts) do
-    upstream_handler = Keyword.get opts, :upstream_handler, &(&1)
-    downstream_handler = Keyword.get opts, :downstream_handler, &(&1)
-    {upstream_handler, downstream_handler}
+    upstream_handler = Keyword.get(opts, :upstream_handler, &(&1))
+    downstream_handler = Keyword.get(opts, :downstream_handler, &(&1))
+    normalize_headers? = Keyword.get(opts, :normalize_headers?, false)
+
+    {upstream_handler, downstream_handler, normalize_headers?}
   end
 
-  def call(conn, {upstream_handler, downstream_handler}) do
+  def call(conn, {upstream_handler, downstream_handler, normalize_headers?}) do
     method = conn.method |> String.downcase |> String.to_atom
     url = extract_url(conn)
     headers = extract_request_headers(conn)
@@ -35,7 +38,7 @@ defmodule Troxy do
     # Read response async
     # https://github.com/benoitc/hackney#get-a-response-asynchronously
 
-    async_handler_task = Task.async __MODULE__, :async_response_handler, [conn]
+    async_handler_task = Task.async __MODULE__, :async_response_handler, [conn, normalize_headers?]
 
     hackney_options = [
       {:follow_redirect, true}, # Follow redirects
@@ -99,24 +102,24 @@ defmodule Troxy do
     Task.await async_handler_task, :infinity
   end
 
+  @spec async_response_handler(Plug.Conn.t, boolean) :: Plug.Conn.t
   # Not private function because it is called in the async task
-  def async_response_handler(conn) do
+  def async_response_handler(conn, normalize_headers?) do
     receive do
       {:hackney_response, _hackney_client, {:status, status_code, _reason_phrase}} ->
         Logger.info "Got status code #{status_code}"
 
         conn
         |> put_status(status_code)
-        |> async_response_handler
+        |> async_response_handler(normalize_headers?)
       {:hackney_response, _hackney_client, {:headers, headers}} ->
         Logger.info "Got headers #{inspect headers}"
 
         conn
-        # |> put_resp_headers(headers)
-        |> put_untouched_resp_headers(headers) # Don't downcase them (maybe the client relies on casing)
+        |> put_resp_headers(headers, normalize_headers?)
         # PR: There should be a send_chunk that internally reads the status from the connection if it is already set
         |> send_chunked(conn.status)
-        |> async_response_handler
+        |> async_response_handler(normalize_headers?)
       {:hackney_response, _hackney_client, body_chunk} when is_binary(body_chunk) ->
         Logger.info "Got body chunk"
 
@@ -124,7 +127,7 @@ defmodule Troxy do
         {:ok, conn} = chunk(conn, body_chunk)
 
         conn
-        |> async_response_handler
+        |> async_response_handler(normalize_headers?)
       {:hackney_response, _hackney_client, :done} ->
         Logger.info "Got everything!"
 
@@ -136,6 +139,8 @@ defmodule Troxy do
     # TODO: Forward port
     # FIX: conn.request_path for https requests is like "yahoo.com:443"
     host = conn.req_headers["host"]
+    # raise "has to have an upstream host"
+
     base = to_string(conn.scheme) <> "://" <> host <> conn.request_path
     case conn.query_string do
       "" -> base
@@ -151,14 +156,25 @@ defmodule Troxy do
     |> Map.get(:req_headers)
   end
 
-  defp put_resp_headers(conn, []), do: conn
-  defp put_resp_headers(conn, [{header, value}|remaining_headers]) do
-    conn
-    |> put_resp_header(String.downcase(header), value)
-    |> put_resp_headers remaining_headers
+  @spec put_resp_headers(Plug.Conn.t, [{String.t, String.t}], boolean) :: Plug.Conn.t
+  defp put_resp_headers(conn, headers, normalize_headers?) do
+    if normalize_headers? do
+      put_normalized_resp_headers(conn, headers)
+    else
+      # Don't downcase them (maybe the client relies on the original casing)
+      put_raw_resp_headers(conn, headers)
+    end
   end
 
-  defp put_untouched_resp_headers(conn, headers) do
+  defp put_normalized_resp_headers(conn, []), do: conn
+  defp put_normalized_resp_headers(conn, [{header, value}|remaining_headers]) do
+    conn
+    |> put_resp_header(String.downcase(header), value)
+    |> put_normalized_resp_headers remaining_headers
+  end
+
+  @spec put_raw_resp_headers(Plug.Conn.t, [{String.t, String.t}]) :: Plug.Conn.t
+  defp put_raw_resp_headers(conn, headers) do
     %{conn | resp_headers: headers}
   end
 
