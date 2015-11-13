@@ -6,15 +6,28 @@ Tee Proxy
 Usage
 ------
 
+Get [hex](http://hex.pm) dependencies
+
 ```
 mix deps.get
-mix serve
 ```
 
-Use cases
----------
+Run server on iex
 
-todo
+```
+iex -S mix serve
+```
+
+Close it by pressing `C-c` twice, or typing `Troxy.Server.stop`
+
+open [troxy.space](http://troxy.space)
+
+Useful modules are:
+-----------
+
+- Troxy.Interfaces.Plug
+  + Troxy.Interfaces.DefaultHandlers
+- Troxy.Server
 
 Dependencies
 ------------
@@ -22,25 +35,14 @@ Dependencies
 - Plug
 - Hackney
 
-Benchmarks
-------------
-
-todo
 
 Todo
 ----
 
-  - Callbacks
-   - before_upstream
-   - after_upstream
-   - before_downstream
-   - after_downstream
- - Short circuit self proxy requests
- - Tests
  - Blacklisting hosts
  - Caching
    - We forward headers upstream, so at least we could check those are not expired and reply without sending a request to upstream
- - Generate JSON Schema
+ - Generate JSON Schema, RAML, Swagger
  - Web ui
    - Postman/Paw like request creator
    - View live requests in/out
@@ -52,34 +54,36 @@ Todo
  - Add RFC3986 parsing
    - https://github.com/marcelog/ex_rfc3986
  - Adapters
+ - Benchmarks
 
 
 Adapters
 -----
 
-- Troxy.Client.Adapters
-  - hackney
-  - gun https://github.com/ninenines/gun
-  - ibrowse
+- Client.Adapters
+  + [hackney](https://github.com/benoitc/hackney)
+  + [gun](https://github.com/ninenines/gun)
+  + [ibrowse](https://github.com/cmullaparthi/ibrowse)
 
 - API.Adapters
-  - Swagger
+  + JSON Schema
+  + RAML
+  + API Blueprint
+  + Swagger
 
 - Auth.Adapters
-  - OAuth1
-  - OAuth2
-
- - https://getkong.org/plugins/#authentication
+  + OAuth1
+  + OAuth2
+  + https://getkong.org/plugins/#authentication
 
 Inspired on
 -----------
 
- - mitmproxy
- - HTTP clients like Paw
+ - mitmproxy, charles
+ - HTTP clients like paw, postman
  - ngrok
-
 
 Similar projects
 ----
 
-https://github.com/slogsdon/elixir-reverse-proxy
+ - [elixir-reverse-proxy](https://github.com/slogsdon/elixir-reverse-proxy)

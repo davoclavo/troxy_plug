@@ -13,7 +13,7 @@ defmodule Troxy.Mixfile do
   # An alias to run the server
   def aliases do
     # Extend the existing run task to ensure we invoke Server.start/1 afterwards
-    [serve: ["run", &Server.start/1]]
+    [serve: ["run", &Troxy.Server.start/1]]
   end
 
   # OTP Application configuration
