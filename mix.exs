@@ -13,7 +13,7 @@ defmodule Troxy.Mixfile do
   # An alias to run the server
   def aliases do
     # Extend the existing run task to ensure we invoke Server.start/1 afterwards
-    [serve: ["run", &Troxy.Server.start/1]]
+    [server: ["run", &Troxy.Server.start/1]]
   end
 
   # OTP Application configuration
@@ -24,6 +24,9 @@ defmodule Troxy.Mixfile do
                     :plug,
                     :hackney]]
   end
+
+  # Include test support modules
+  # defp elixirc_paths(:test), do: ["lib", "test/support"]
 
   # Dependencies
   defp deps do

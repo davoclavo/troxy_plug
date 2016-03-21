@@ -33,7 +33,8 @@ defmodule Troxy.Interfaces.Plug do
   def init(opts) do
     opts
     |> add_default_option(:handler_module, __MODULE__)
-    |> add_default_option(:normalize_headers?, false)
+    |> add_default_option(:normalize_headers?, true)
+    |> add_default_option(:follow_redirects?, false)
     |> add_default_option(:stream?, true)
   end
 
@@ -53,12 +54,13 @@ defmodule Troxy.Interfaces.Plug do
     async_handler_task = Task.async __MODULE__, :async_response_handler, [conn, opts]
 
     hackney_options = [
-      {:follow_redirect, true}, # Follow redirects
+      {:follow_redirect, opts[:follow_redirects?]}, # Follow redirects
       {:max_redirect, 5},       # Default max redirects
       {:force_redirect, true},  # Force redirect even on POST
       :async,                   # Async response
-      {:stream_to, async_handler_task.pid} # Async PID handler
-    # :insecure                 # Ignore SSL cert validation
+      {:stream_to, async_handler_task.pid}, # Async PID handler
+      :insecure                 # Ignore SSL cert validation
+      # {:ssl_options, ssl_options} # Options for the SSL module
     ]
 
     # Streaming the upstream request payload
@@ -78,6 +80,7 @@ defmodule Troxy.Interfaces.Plug do
         downstream_chunked_response(async_handler_task, hackney_client)
         |> opts[:handler_module].downstream_handler
       {:error, cause} -> raise(Error, "upstream: " <> to_string(cause))
+      # :econnrefused
     end
 
   end
@@ -120,16 +123,37 @@ defmodule Troxy.Interfaces.Plug do
   defp downstream_chunked_response(async_handler_task, hackney_client) do
     {:ok, _hackney_client} = :hackney.start_response(hackney_client)
     Logger.debug "< downstream started"
-    Task.await(async_handler_task, :infinity)
+    Task.await(async_handler_task)
+    # |> Plug.Conn.halt(conn)
+    # Task.await(async_handler_task, :infinity)
   end
 
   # Not private function because it is called in the async task
   @spec async_response_handler(Plug.Conn.t, Keyword.t) :: Plug.Conn.t
   def async_response_handler(conn, opts) do
     receive do
-      # Redirects
-      # {:hackney_response, _hackney_client, {:redirect, to, headers}} ->
-      # {:hackney_response, _hackney_client, {:see_other, to, headers}} ->
+      {:hackney_response, _hackney_clients, {redirect, to_url, headers}} when redirect in [:redirect, :see_other] ->
+        Logger.debug "<<< redirect to #{to_url}"
+        # TODO: Handle HTTPS redirects
+        # TODO: Handle Retry-After headers
+        # TODO: Handle remaining_redirects
+        # TODO: Update request_path, path_info
+        to_uri = URI.parse(to_url)
+
+        Logger.debug(inspect to_uri)
+        Logger.debug(inspect conn)
+        conn
+        # TODO: fill path_info, scheme
+        |> Map.merge(%Plug.Conn{
+              host: to_uri.host,
+              request_path: to_uri.path,
+              query_string: to_uri.query || ""})
+        |> put_req_header("host", to_uri.authority)
+        |> __MODULE__.call(opts)
+        # {:hackney_response, #Reference<0.0.1.1809>, {:redirect, "http://m.imgur.com/", [{"Retry-After", "0"}, {"Location", "http://m.imgur.com/"}, {"Content-Length", "0"}, {"Accept-Ranges", "bytes"}, {"Date", "Sat, 14 Nov 2015 23:47:59 GMT"}, {"Connection", "close"}, {"X-Served-By", "cache-sjc3122-SJC"}, {"X-Cache", "HIT"}, {"X-Cache-Hits", "0"}, {"Server", "cat factory 1.0"}, {"Cache-Control", "no-store, no-cache, must-revalidate, post-check=0, pre-check=0"}, {"X-Frame-Options", "DENY"}]}}
+        # conn
+        # |> put_resp_headers(headers, opts[:normalize_headers?])
+        # |> send_resp(303, "")
       {:hackney_response, _hackney_client, {:status, status_code, _reason_phrase}} ->
         Logger.debug "<< status code #{status_code}"
         conn
@@ -151,25 +175,32 @@ defmodule Troxy.Interfaces.Plug do
       {:hackney_response, _hackney_client, :done} ->
         Logger.debug "<< done chunking!"
         conn
+      {:hackney_response, _hackney_client, {:error, {:closed, reason}}} ->
+        Logger.error "Connection closed. Reason: #{reason}"
+        conn
+      unexpected ->
+        raise unexpected
     end
   end
 
   defp extract_url(conn) do
-    # TODO: Forward port
     # FIX: conn.request_path for https requests is like "yahoo.com:443"
     host = conn.req_headers["host"]
     # raise "has to have an upstream host"
     if host == nil, do: raise(Error, "upstream: missing host header")
 
+    # Implement String.Chars protocol for URI
     # %URI{
     #   host: conn.req_headers["host"],
     # }
-    Logger.debug(host)
-    troxy_port = to_string(Application.get_env(:troxy, :http_port))
+
+    port = case conn.scheme do
+       http when http in [:http, :https] -> to_string(Application.get_env(:troxy, http)[:port])
+    end
     case host do
-      "localhost:" <> ^troxy_port ->
+      "localhost:" <> ^port ->
         raise(Error, "upstream: can't proxy itself")
-      _ ->
+      default ->
         base = to_string(conn.scheme) <> "://" <> host <> conn.request_path
         case conn.query_string do
             "" -> base
