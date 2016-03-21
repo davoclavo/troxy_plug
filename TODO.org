@@ -1,0 +1,15 @@
+* Supoort HTTPS
+** Run cowboy
+** Add test
+
+* Using cowboy hooks to remove the default headers
+Is it really needed?
+* TODO Support following redirects for streamed req/resp
+* TODO Support websockets
+* TODO Fix bug where connections are prematurely closed
+* TODO Fix bug where connections aren't closed
+
+C-q C-l
+
+ETS table
+Amnesia - If I want to persist
