@@ -15,7 +15,7 @@ mix deps.get
 Run server on iex
 
 ```
-iex -S mix serve
+iex -S mix server
 ```
 
 Close it by pressing `C-c` twice, or typing `Troxy.Server.stop`

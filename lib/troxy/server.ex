@@ -17,6 +17,8 @@ defmodule Troxy.Server do
         otp_app: :troxy,
         keyfile: "priv/erl_cowboy/dummy.key",
         certfile: "priv/erl_cowboy/dummy.crt"
+
+    Logger.info "GO!"
   end
 
   def stop do

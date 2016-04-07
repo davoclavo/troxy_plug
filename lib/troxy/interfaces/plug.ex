@@ -43,6 +43,7 @@ defmodule Troxy.Interfaces.Plug do
   end
 
   def call(conn, opts) do
+    Logger.debug ">>>"
     method = conn.method |> String.downcase |> String.to_atom
     url = extract_url(conn)
     headers = extract_request_headers(conn)
@@ -185,7 +186,7 @@ defmodule Troxy.Interfaces.Plug do
 
   defp extract_url(conn) do
     # FIX: conn.request_path for https requests is like "yahoo.com:443"
-    host = conn.req_headers["host"]
+    host = :proplists.get_value("host", conn.req_headers)
     # raise "has to have an upstream host"
     if host == nil, do: raise(Error, "upstream: missing host header")
 
