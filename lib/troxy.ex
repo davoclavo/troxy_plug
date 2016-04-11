@@ -5,7 +5,7 @@ defmodule Troxy do
     end
   end
 
-  # def start do
-  #   Troxy.Supervisor.start_link
-  # end
+  def start do
+    Application.ensure_all_started(:troxy)
+  end
 end

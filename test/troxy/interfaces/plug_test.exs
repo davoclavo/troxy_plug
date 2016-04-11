@@ -51,8 +51,8 @@ defmodule Troxy.Interfaces.PlugTest do
   end
 
   test "supports not following redirects" do
-    conn = PlugHelper.create_conn(:httparrot, :get, "/redirect/4")
-           |> PlugHelper.call_plug(Troxy.Interfaces.Plug, [])
+    conn = create_conn(:httparrot, :http, :get, "/redirect/4")
+           |> init_and_call_plug(Troxy.Interfaces.Plug, [])
 
     assert conn.status == 301
     location_header = List.first(get_resp_header(conn, "location"))
