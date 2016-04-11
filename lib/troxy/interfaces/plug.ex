@@ -42,6 +42,7 @@ defmodule Troxy.Interfaces.Plug do
     Keyword.update(opts, key, value, &(&1))
   end
 
+  def call(conn = %Plug.Conn{assigns: %{skip_troxy: true}}, _opts), do: conn
   def call(conn, opts) do
     Logger.debug ">>>"
     method = conn.method |> String.downcase |> String.to_atom
@@ -80,6 +81,7 @@ defmodule Troxy.Interfaces.Plug do
 
         downstream_chunked_response(async_handler_task, hackney_client)
         |> opts[:handler_module].downstream_handler
+        |> Plug.Conn.halt
       {:error, cause} -> raise(Error, "upstream: " <> to_string(cause))
       # :econnrefused
     end
@@ -215,6 +217,7 @@ defmodule Troxy.Interfaces.Plug do
     # TODO: Add X-Forwarded-For ?? maybe as an option?
     conn
     |> delete_req_header("host")
+    |> delete_req_header("cache-control") # Added by Plug?
     |> Map.get(:req_headers)
   end
 
