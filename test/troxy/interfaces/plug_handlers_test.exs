@@ -11,42 +11,67 @@ defmodule Troxy.Interfaces.PlugHandlersTest do
     use Plug.Builder
     use Troxy.Interfaces.Plug
 
-    def upstream_handler(conn) do
-      send conn.private[:test_runner], :from_upstream_handler
+    def req_handler(conn) do
+      send conn.private[:test_runner], :from_req_handler
       conn
     end
 
-    def downstream_handler(conn) do
-      send conn.private[:test_runner], :from_downstream_handler
+    def resp_handler(conn) do
+      send conn.private[:test_runner], :from_resp_handler
+      conn
+    end
+
+    def req_body_handler(conn, body_chunk) do
+      send conn.private[:test_runner], {:from_req_body_handler, body_chunk}
+      conn
+    end
+
+    def resp_body_handler(conn, body_chunk) do
+      send conn.private[:test_runner], {:from_resp_body_handler, body_chunk}
       conn
     end
   end
 
-  test "calls upstream_handler" do
+  test "calls req_handler" do
     connect_plug(TestPlug, [])
-    assert_received(:from_upstream_handler)
+    assert_received(:from_req_handler)
   end
 
-  test "calls downstream_handler" do
+  test "calls resp_handler" do
     connect_plug(TestPlug, [])
-    assert_received(:from_downstream_handler)
+    assert_received(:from_resp_handler)
+  end
+
+  test "calls req_body_handler" do
+    connect_plug(TestPlug, [])
+    assert_received({:from_req_body_handler, body_chunk})
+    # TODO: make a post request with body
+    assert body_chunk == ""
+  end
+
+  test "calls resp_body_handler" do
+    connect_plug(TestPlug, [])
+    assert_received({:from_resp_body_handler, body_chunk})
+    assert body_chunk == "{\n  \"args\": {},\n  \"headers\": {\n    \"transfer-encoding\": \"chunked\",\n    \"user-agent\": \"hackney/1.4.8\",\n    \"host\": \"localhost:10080\"\n  },\n  \"url\": \"http://localhost:10080/get\",\n  \"origin\": \"127.0.0.1\"\n}"
   end
 
   defmodule TestIncompletePlug do
     use Plug.Builder
     use Troxy.Interfaces.Plug
 
-    def upstream_handler(conn) do
-      send conn.private[:test_runner], :from_upstream_handler
+    def req_handler(conn) do
+      send conn.private[:test_runner], :from_req_handler
       conn
     end
 
-    # No downstream_handler on purpose
+    # No resp_handler on purpose
   end
 
-  test "calls upstream_handler even if not all handlers are implemented" do
+  test "calls req_handler even if not all handlers are implemented" do
     connect_plug(TestIncompletePlug, [])
-    assert_received(:from_upstream_handler)
-    refute_received(:from_downstream_handler)
+    assert_received(:from_req_handler)
+    refute_received(:from_resp_handler)
+    refute_received(:from_req_body_handler)
+    refute_received(:from_resp_body_handler)
   end
 end

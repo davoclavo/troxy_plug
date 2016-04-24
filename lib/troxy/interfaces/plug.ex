@@ -74,13 +74,13 @@ defmodule Troxy.Interfaces.Plug do
     case :hackney.request(method, url, headers, payload, hackney_options) do
       {:ok, hackney_client} ->
         conn
-        |> opts[:handler_module].upstream_handler
-        |> upstream_chunked_request(hackney_client)
+        |> opts[:handler_module].req_handler
+        |> upstream_chunked_request(opts, hackney_client)
 
         Logger.debug ">>> upstream complete"
 
         downstream_chunked_response(async_handler_task, hackney_client)
-        |> opts[:handler_module].downstream_handler
+        |> opts[:handler_module].resp_handler
         |> Plug.Conn.halt
       {:error, cause} -> raise(Error, "upstream: " <> to_string(cause))
       # :econnrefused
@@ -90,20 +90,22 @@ defmodule Troxy.Interfaces.Plug do
 
   # Reads the original request body and writes it to the hackney client recursively
   # Can I start reading the body before I even get it all?
-  defp upstream_chunked_request(conn, hackney_client) do
+  defp upstream_chunked_request(conn, opts, hackney_client) do
     # Read a chunk of the request body
     # Plug.Conn.read_body for more info
     case read_body(conn) do
-      {:more, partial_body, conn} ->
+      {:more, body_chunk, conn} ->
         # There is still body to be read
-        :hackney.send_body(hackney_client, partial_body)
-        # Read more body
-        upstream_chunked_request(conn, hackney_client)
+        :hackney.send_body(hackney_client, body_chunk)
 
-      {:ok, body, conn} ->
-        # The last part of the body has been read
-        :hackney.send_body(hackney_client, body)
         conn
+        |> opts[:handler_module].req_body_handler(body_chunk)
+        |> upstream_chunked_request(opts, hackney_client)
+      {:ok, body_chunk, conn} ->
+        # The last part of the body has been read
+        :hackney.send_body(hackney_client, body_chunk)
+        conn
+        |> opts[:handler_module].req_body_handler(body_chunk)
     end
   end
 
@@ -174,6 +176,7 @@ defmodule Troxy.Interfaces.Plug do
         # Enum.into([body_chunk], conn)
         {:ok, conn} = chunk(conn, body_chunk)
         conn
+        |> opts[:handler_module].resp_body_handler(body_chunk)
         |> async_response_handler(opts)
       {:hackney_response, _hackney_client, :done} ->
         Logger.debug "<< done chunking!"
