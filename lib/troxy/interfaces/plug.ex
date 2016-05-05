@@ -99,13 +99,13 @@ defmodule Troxy.Interfaces.Plug do
         :hackney.send_body(hackney_client, body_chunk)
 
         conn
-        |> opts[:handler_module].req_body_handler(body_chunk)
+        |> opts[:handler_module].req_body_handler(body_chunk, true)
         |> upstream_chunked_request(opts, hackney_client)
       {:ok, body_chunk, conn} ->
         # The last part of the body has been read
         :hackney.send_body(hackney_client, body_chunk)
         conn
-        |> opts[:handler_module].req_body_handler(body_chunk)
+        |> opts[:handler_module].req_body_handler(body_chunk, false)
     end
   end
 
@@ -176,11 +176,13 @@ defmodule Troxy.Interfaces.Plug do
         # Enum.into([body_chunk], conn)
         {:ok, conn} = chunk(conn, body_chunk)
         conn
-        |> opts[:handler_module].resp_body_handler(body_chunk)
+        |> opts[:handler_module].resp_body_handler(body_chunk, true)
         |> async_response_handler(opts)
       {:hackney_response, _hackney_client, :done} ->
         Logger.debug "<< done chunking!"
+
         conn
+        |> opts[:handler_module].resp_body_handler("", false)
       {:hackney_response, _hackney_client, {:error, {:closed, reason}}} ->
         Logger.error "Connection closed. Reason: #{reason}"
         conn
@@ -200,9 +202,11 @@ defmodule Troxy.Interfaces.Plug do
     #   host: conn.req_headers["host"],
     # }
 
+    # TODO: Remove this...
     port = case conn.scheme do
        http when http in [:http, :https] -> to_string(Application.get_env(:troxy, http)[:port])
     end
+
     case host do
       "localhost:" <> ^port ->
         raise(Error, "upstream: can't proxy itself")
