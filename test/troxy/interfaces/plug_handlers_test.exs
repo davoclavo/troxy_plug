@@ -21,13 +21,13 @@ defmodule Troxy.Interfaces.PlugHandlersTest do
       conn
     end
 
-    def req_body_handler(conn, body_chunk) do
-      send conn.private[:test_runner], {:from_req_body_handler, body_chunk}
+    def req_body_handler(conn, body_chunk, more_body) do
+      send conn.private[:test_runner], {:from_req_body_handler, {body_chunk, more_body}}
       conn
     end
 
-    def resp_body_handler(conn, body_chunk) do
-      send conn.private[:test_runner], {:from_resp_body_handler, body_chunk}
+    def resp_body_handler(conn, body_chunk, more_body) do
+      send conn.private[:test_runner], {:from_resp_body_handler, {body_chunk, more_body}}
       conn
     end
   end
@@ -44,14 +44,15 @@ defmodule Troxy.Interfaces.PlugHandlersTest do
 
   test "calls req_body_handler" do
     connect_plug(TestPlug, [])
-    assert_received({:from_req_body_handler, body_chunk})
+    assert_received({:from_req_body_handler, {body_chunk, false}})
     # TODO: make a post request with body
     assert body_chunk == ""
   end
 
   test "calls resp_body_handler" do
     connect_plug(TestPlug, [])
-    assert_received({:from_resp_body_handler, body_chunk})
+    assert_received({:from_resp_body_handler, {body_chunk, true}})
+    assert_received({:from_resp_body_handler, {_body_chunk, false}})
     assert body_chunk == "{\n  \"args\": {},\n  \"headers\": {\n    \"transfer-encoding\": \"chunked\",\n    \"user-agent\": \"hackney/1.4.8\",\n    \"host\": \"localhost:10080\"\n  },\n  \"url\": \"http://localhost:10080/get\",\n  \"origin\": \"127.0.0.1\"\n}"
   end
 
