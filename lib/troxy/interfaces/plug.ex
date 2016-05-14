@@ -80,10 +80,19 @@ defmodule Troxy.Interfaces.Plug do
         Logger.debug ">>> upstream complete"
 
         downstream_chunked_response(async_handler_task, hackney_client)
-        |> opts[:handler_module].resp_handler
         |> Plug.Conn.halt
-      {:error, cause} -> raise(Error, "upstream: " <> to_string(cause))
-      # :econnrefused
+      {:error, cause} ->
+        error_msg = inspect(cause)
+        conn
+        |> opts[:handler_module].req_handler
+        |> opts[:handler_module].req_body_handler("", false)
+        |> put_resp_header("x-troxy-error", error_msg)
+        |> send_resp(500, error_msg)
+        |> opts[:handler_module].resp_handler
+        |> opts[:handler_module].resp_body_handler(error_msg, false)
+        |> Plug.Conn.halt
+        # raise(Error, "upstream: " <> to_string(cause))
+        # :econnrefused
     end
 
   end
@@ -168,12 +177,14 @@ defmodule Troxy.Interfaces.Plug do
         Logger.debug "<< headers #{inspect headers}"
         conn
         |> put_resp_headers(headers, opts[:normalize_headers?])
+        |> opts[:handler_module].resp_handler
         # PR: There should be a send_chunk that reads the status from conn if it is already set
         |> send_chunked(conn.status)
         |> async_response_handler(opts)
       {:hackney_response, _hackney_client, body_chunk} when is_binary(body_chunk) ->
         Logger.debug "<< body chunk"
         # Enum.into([body_chunk], conn)
+        # TODO: Chunk after the handler, so the response can be modified
         {:ok, conn} = chunk(conn, body_chunk)
         conn
         |> opts[:handler_module].resp_body_handler(body_chunk, true)

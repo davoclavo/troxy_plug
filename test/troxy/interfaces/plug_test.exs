@@ -50,8 +50,8 @@ defmodule Troxy.Interfaces.PlugTest do
     end
   end
 
-  test "supports not following redirects" do
-    conn = create_conn(:httparrot, :http, :get, "/redirect/4")
+  test "defaults to not following redirects" do
+    conn = create_conn(:httparrot, :http, :get, "/redirect/3")
            |> init_and_call_plug(Troxy.Interfaces.Plug, [])
 
     assert conn.status == 301
@@ -61,7 +61,14 @@ defmodule Troxy.Interfaces.PlugTest do
 
   # opts - follow_redirects?: true
   # cache these redirects?
-  test "supports async redirects"
+  test "supports async redirects" do
+    conn = create_conn(:httparrot, :http, :get, "/redirect/3")
+    |> init_and_call_plug(Troxy.Interfaces.Plug, [follow_redirects?: true])
+
+    assert conn.status == 200
+    location_header = List.first(get_resp_header(conn, "location"))
+    assert(location_header =~ ~r(/redirect/3$))
+  end
 
   defp call_plug(opts) do
     create_conn
