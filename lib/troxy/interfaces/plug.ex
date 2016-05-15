@@ -42,7 +42,7 @@ defmodule Troxy.Interfaces.Plug do
     Keyword.update(opts, key, value, &(&1))
   end
 
-  def call(conn = %Plug.Conn{assigns: %{skip_troxy: true}}, _opts), do: conn
+  def call(conn = %Plug.Conn{private: %{plug_skip_troxy: true}}, _opts), do: conn
   def call(conn, opts) do
     Logger.debug ">>>"
     method = conn.method |> String.downcase |> String.to_atom
@@ -53,7 +53,7 @@ defmodule Troxy.Interfaces.Plug do
 
     # Read response async
     # https://github.com/benoitc/hackney#get-a-response-asynchronously
-    async_handler_task = Task.async __MODULE__, :async_response_handler, [conn, opts]
+    async_handler_task = Task.async(__MODULE__, :async_response_handler, [conn, opts])
 
     hackney_options = [
       {:follow_redirect, opts[:follow_redirects?]}, # Follow redirects
@@ -91,14 +91,11 @@ defmodule Troxy.Interfaces.Plug do
         |> opts[:handler_module].resp_handler
         |> opts[:handler_module].resp_body_handler(error_msg, false)
         |> Plug.Conn.halt
-        # raise(Error, "upstream: " <> to_string(cause))
-        # :econnrefused
     end
 
   end
 
   # Reads the original request body and writes it to the hackney client recursively
-  # Can I start reading the body before I even get it all?
   defp upstream_chunked_request(conn, opts, hackney_client) do
     # Read a chunk of the request body
     # Plug.Conn.read_body for more info
@@ -118,6 +115,7 @@ defmodule Troxy.Interfaces.Plug do
     end
   end
 
+  # TODO: Use this to send response after all body is read
   defp send_response(conn, hackney_client) do
     # Missing case
     # {:error, :timeout}
@@ -138,7 +136,6 @@ defmodule Troxy.Interfaces.Plug do
     {:ok, _hackney_client} = :hackney.start_response(hackney_client)
     Logger.debug "< downstream started"
     Task.await(async_handler_task)
-    # |> Plug.Conn.halt(conn)
     # Task.await(async_handler_task, :infinity)
   end
 
@@ -146,7 +143,7 @@ defmodule Troxy.Interfaces.Plug do
   @spec async_response_handler(Plug.Conn.t, Keyword.t) :: Plug.Conn.t
   def async_response_handler(conn, opts) do
     receive do
-      {:hackney_response, _hackney_clients, {redirect, to_url, headers}} when redirect in [:redirect, :see_other] ->
+      {:hackney_response, _hackney_clients, {redirect, to_url, _headers}} when redirect in [:redirect, :see_other] ->
         Logger.debug "<<< redirect to #{to_url}"
         # TODO: Handle HTTPS redirects
         # TODO: Handle Retry-After headers
@@ -157,14 +154,17 @@ defmodule Troxy.Interfaces.Plug do
         Logger.debug(inspect to_uri)
         Logger.debug(inspect conn)
         conn
-        # TODO: fill path_info, scheme
         |> Map.merge(%Plug.Conn{
+              # TODO: fill path_info, scheme
               host: to_uri.host,
               request_path: to_uri.path,
-              query_string: to_uri.query || ""})
+              query_string: to_uri.query || ""}
+              # Wondering why the Map.take??? - Plug.Conn has some defaults, so we don't want to override with them
+              # TODO: improve this awful merge... I just don't know how to do:
+              # %Plug.Conn{conn | host: to_uri.host ...} within a pipe |>
+              |> Map.take([:host, :request_path, :query_string]))
         |> put_req_header("host", to_uri.authority)
         |> __MODULE__.call(opts)
-        # {:hackney_response, #Reference<0.0.1.1809>, {:redirect, "http://m.imgur.com/", [{"Retry-After", "0"}, {"Location", "http://m.imgur.com/"}, {"Content-Length", "0"}, {"Accept-Ranges", "bytes"}, {"Date", "Sat, 14 Nov 2015 23:47:59 GMT"}, {"Connection", "close"}, {"X-Served-By", "cache-sjc3122-SJC"}, {"X-Cache", "HIT"}, {"X-Cache-Hits", "0"}, {"Server", "cat factory 1.0"}, {"Cache-Control", "no-store, no-cache, must-revalidate, post-check=0, pre-check=0"}, {"X-Frame-Options", "DENY"}]}}
         # conn
         # |> put_resp_headers(headers, opts[:normalize_headers?])
         # |> send_resp(303, "")
@@ -203,10 +203,9 @@ defmodule Troxy.Interfaces.Plug do
   end
 
   defp extract_url(conn) do
-    # FIX: conn.request_path for https requests is like "yahoo.com:443"
-    host = :proplists.get_value("host", conn.req_headers)
-    # raise "has to have an upstream host"
-    if host == nil, do: raise(Error, "upstream: missing host header")
+    # TODO: fix conn.request_path for https requests is like "yahoo.com:443"
+    host = Plug.Conn.get_req_header(conn, "host") |> List.first
+    if host == nil, do: raise(Error, "missing request host header")
 
     # Implement String.Chars protocol for URI
     # %URI{
@@ -221,7 +220,7 @@ defmodule Troxy.Interfaces.Plug do
     case host do
       "localhost:" <> ^port ->
         raise(Error, "upstream: can't proxy itself")
-      default ->
+      _ ->
         base = to_string(conn.scheme) <> "://" <> host <> conn.request_path
         case conn.query_string do
             "" -> base
@@ -250,10 +249,10 @@ defmodule Troxy.Interfaces.Plug do
   end
 
   defp put_normalized_resp_headers(conn, []), do: conn
-  defp put_normalized_resp_headers(conn, [{header, value}|remaining_headers]) do
+  defp put_normalized_resp_headers(conn, [{header, value} | remaining_headers]) do
     conn
     |> put_resp_header(String.downcase(header), value)
-    |> put_normalized_resp_headers remaining_headers
+    |> put_normalized_resp_headers(remaining_headers)
   end
 
   @spec put_raw_resp_headers(Plug.Conn.t, [{String.t, String.t}]) :: Plug.Conn.t
