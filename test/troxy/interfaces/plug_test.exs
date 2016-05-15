@@ -5,48 +5,51 @@ defmodule Troxy.Interfaces.PlugTest do
 
   @opts Troxy.Interfaces.Plug.init([])
 
+  test "should skip plug if plug_skip_troxy private is set" do
+    conn = create_conn
+    |> Plug.Conn.put_private(:plug_skip_troxy, true)
+    |> init_and_call_plug(Troxy.Interfaces.Plug, [])
+
+    assert conn.halted == false
+    assert conn.status == nil
+  end
+
   test "reads the upstream from the host header" do
     conn = call_plug(@opts)
     assert conn.status == 200
     assert get_resp_header(conn, "content-type") == ["application/json"]
   end
 
-  test "configurable to normalize the headers" do
+  test "configurable to normalize the response headers" do
     opts = Troxy.Interfaces.Plug.init([normalize_headers?: true])
-
-    conn = create_conn
-    |> put_req_header("Non-Normalized-Header", "Test")
-    |> Troxy.Interfaces.Plug.call(opts)
-
+    conn = call_plug(opts)
     refute get_resp_header(conn, "Content-Type") == ["application/json"]
     assert get_resp_header(conn, "content-type") == ["application/json"]
   end
 
-  test "configurable to keep the raw headers" do
+  test "configurable to leave intact the response headers" do
     opts = Troxy.Interfaces.Plug.init([normalize_headers?: false])
-    conn = call_plug(opts)
 
-    refute get_resp_header(conn, "content-type") == ["application/json"]
+    # TODO: A mocked response with Non-Normalized-Header is needed, or add an endpoint to httparrot to customize header responses
+    conn = call_plug(opts)
     assert get_resp_header(conn, "Content-Type") == ["application/json"]
+    refute get_resp_header(conn, "content-type") == ["application/json"]
   end
 
   test "configurable to synchronously the response downstream"
   test "configurable to chunk the response downstream"
 
   test "supports HTTPS" do
-    opts = Troxy.Interfaces.Plug.init([])
     conn = create_conn(:httparrot, :https, :get, "/get")
-    |> Troxy.Interfaces.Plug.call(opts)
-
+    |> Troxy.Interfaces.Plug.call(@opts)
     assert conn.status == 200
   end
 
   test "rejects requests without host header" do
-    assert_raise Troxy.Interfaces.Plug.Error, "upstream: missing host header", fn ->
-      opts = Troxy.Interfaces.Plug.init([normalize_headers?: true])
+    assert_raise Troxy.Interfaces.Plug.Error, "missing request host header", fn ->
       create_conn
       |> delete_req_header("host")
-      |> Troxy.Interfaces.Plug.call(opts)
+      |> Troxy.Interfaces.Plug.call(@opts)
     end
   end
 
@@ -56,24 +59,24 @@ defmodule Troxy.Interfaces.PlugTest do
 
     assert conn.status == 301
     location_header = List.first(get_resp_header(conn, "location"))
-    assert(location_header =~ ~r(/redirect/3$))
+    assert(location_header =~ ~r(/redirect/\d$))
   end
 
-  # opts - follow_redirects?: true
-  # cache these redirects?
-  test "supports async redirects" do
+  # TODO: cache these redirects?
+  test "supports async GET redirects" do
     conn = create_conn(:httparrot, :http, :get, "/redirect/3")
     |> init_and_call_plug(Troxy.Interfaces.Plug, [follow_redirects?: true])
-
     assert conn.status == 200
-    location_header = List.first(get_resp_header(conn, "location"))
-    assert(location_header =~ ~r(/redirect/3$))
   end
+
+  test "supports async POST redirects with body forwarding"
+  test "handles timeouts, :econnrefused, or :nxdomain errors"
 
   defp call_plug(opts) do
     create_conn
     |> Troxy.Interfaces.Plug.call(opts)
   end
+
 
 # HTTParrot supported requests
 # /ip Returns Origin IP.
