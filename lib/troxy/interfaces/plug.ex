@@ -15,6 +15,7 @@ defmodule Troxy.Interfaces.Plug do
   import Plug.Conn
   require IEx
   require Logger
+  # Defining the DefaultHandlers here as well in order to allow pluging without having to `use`
   use Troxy.Interfaces.DefaultHandlers
 
   defmodule Error do
@@ -23,29 +24,31 @@ defmodule Troxy.Interfaces.Plug do
 
   defmacro __using__(opts) do
     quote location: :keep do
-      # Default handler_module: __MODULE__
+      # Set module `use`ing to be the default handler_module
       plug Troxy.Interfaces.Plug, [{:handler_module, __MODULE__}, unquote_splicing(opts)]
       use Troxy.Interfaces.DefaultHandlers
     end
   end
 
+  @default_opts [
+    handler_module: __MODULE__,
+    normalize_headers?: true,
+    follow_redirects?: false,
+    timeout: 5_000,
+    stream?: true
+  ]
+
   @spec init(Keyword.t) :: Keyword.t
   def init(opts) do
-    opts
-    |> add_default_option(:handler_module, __MODULE__)
-    |> add_default_option(:normalize_headers?, true)
-    |> add_default_option(:follow_redirects?, false)
-    |> add_default_option(:stream?, true)
+    Keyword.merge(@default_opts, opts)
   end
 
-  defp add_default_option(opts, key, value) do
-    Keyword.update(opts, key, value, &(&1))
-  end
-
+  @spec call(Plug.Conn.t, Keyword.t) :: Plug.Conn.t
   def call(conn = %Plug.Conn{private: %{plug_skip_troxy: true}}, _opts), do: conn
   def call(conn, opts) do
+    Logger.debug inspect(opts)
     Logger.debug ">>>"
-    method = conn.method |> String.downcase |> String.to_atom
+    method = conn.method |> String.downcase |> String.to_existing_atom
     url = extract_url(conn)
     headers = extract_request_headers(conn)
 
@@ -61,7 +64,8 @@ defmodule Troxy.Interfaces.Plug do
       {:force_redirect, true},  # Force redirect even on POST
       :async,                   # Async response
       {:stream_to, async_handler_task.pid}, # Async PID handler
-      :insecure                 # Ignore SSL cert validation
+      {:pool, :default},
+      :insecure,                 # Ignore SSL cert validation
       # {:ssl_options, ssl_options} # Options for the SSL module
     ]
 
@@ -73,6 +77,10 @@ defmodule Troxy.Interfaces.Plug do
 
     case :hackney.request(method, url, headers, payload, hackney_options) do
       {:ok, hackney_client} ->
+        # TODO: use a case to match if the async response becomes serialized
+        # by using `:hackney.stop_async(hackney_client)`
+        # e.g. to update about the headers, but intercept the body.
+        # https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl#L19-L22
         conn
         |> opts[:handler_module].req_handler
         |> upstream_chunked_request(opts, hackney_client)
@@ -80,7 +88,7 @@ defmodule Troxy.Interfaces.Plug do
         Logger.debug ">>> upstream complete"
 
         downstream_chunked_response(async_handler_task, hackney_client)
-        |> Plug.Conn.halt
+        |> halt
       {:error, cause} ->
         error_msg = inspect(cause)
         conn
@@ -90,7 +98,7 @@ defmodule Troxy.Interfaces.Plug do
         |> send_resp(500, error_msg)
         |> opts[:handler_module].resp_handler
         |> opts[:handler_module].resp_body_handler(error_msg, false)
-        |> Plug.Conn.halt
+        |> halt
     end
 
   end
@@ -110,6 +118,7 @@ defmodule Troxy.Interfaces.Plug do
       {:ok, body_chunk, conn} ->
         # The last part of the body has been read
         :hackney.send_body(hackney_client, body_chunk)
+
         conn
         |> opts[:handler_module].req_body_handler(body_chunk, false)
     end
@@ -132,6 +141,7 @@ defmodule Troxy.Interfaces.Plug do
     |> send_resp(status, body)
   end
 
+  @spec downstream_chunked_response(Task.t, PID.t) :: Task.t
   defp downstream_chunked_response(async_handler_task, hackney_client) do
     {:ok, _hackney_client} = :hackney.start_response(hackney_client)
     Logger.debug "< downstream started"
@@ -143,27 +153,25 @@ defmodule Troxy.Interfaces.Plug do
   @spec async_response_handler(Plug.Conn.t, Keyword.t) :: Plug.Conn.t
   def async_response_handler(conn, opts) do
     receive do
-      {:hackney_response, _hackney_clients, {redirect, to_url, _headers}} when redirect in [:redirect, :see_other] ->
-        Logger.debug "<<< redirect to #{to_url}"
+      {:hackney_response, _hackney_clients, {redirect, redirect_url, _headers}} when redirect in [:redirect, :see_other] ->
+        Logger.debug "<<< redirect to #{redirect_url}"
         # TODO: Handle HTTPS redirects
         # TODO: Handle Retry-After headers
         # TODO: Handle remaining_redirects
         # TODO: Update request_path, path_info
-        to_uri = URI.parse(to_url)
+        redirect_uri = URI.parse(redirect_url)
 
-        Logger.debug(inspect to_uri)
+        Logger.debug(inspect redirect_uri)
         Logger.debug(inspect conn)
         conn
-        |> Map.merge(%Plug.Conn{
+        |> Map.merge(%{
+              # Merging with %{} intead of %Plug.Conn{}... because the latter sets some defaults, so we don't want to override with them
               # TODO: fill path_info, scheme
-              host: to_uri.host,
-              request_path: to_uri.path,
-              query_string: to_uri.query || ""}
-              # Wondering why the Map.take??? - Plug.Conn has some defaults, so we don't want to override with them
-              # TODO: improve this awful merge... I just don't know how to do:
-              # %Plug.Conn{conn | host: to_uri.host ...} within a pipe |>
-              |> Map.take([:host, :request_path, :query_string]))
-        |> put_req_header("host", to_uri.authority)
+              host: redirect_uri.host,
+              request_path: redirect_uri.path,
+              query_string: redirect_uri.query || ""
+           })
+        |> put_req_header("host", redirect_uri.authority)
         |> __MODULE__.call(opts)
         # conn
         # |> put_resp_headers(headers, opts[:normalize_headers?])
@@ -178,7 +186,7 @@ defmodule Troxy.Interfaces.Plug do
         conn
         |> put_resp_headers(headers, opts[:normalize_headers?])
         |> opts[:handler_module].resp_handler
-        # PR: There should be a send_chunk that reads the status from conn if it is already set
+        # TODO: PR for Plug: There should be a send_chunk that reads the status from conn if it is already set
         |> send_chunked(conn.status)
         |> async_response_handler(opts)
       {:hackney_response, _hackney_client, body_chunk} when is_binary(body_chunk) ->
@@ -189,8 +197,9 @@ defmodule Troxy.Interfaces.Plug do
         conn
         |> opts[:handler_module].resp_body_handler(body_chunk, true)
         |> async_response_handler(opts)
-      {:hackney_response, _hackney_client, :done} ->
+      {:hackney_response, hackney_client, :done} ->
         Logger.debug "<< done chunking!"
+        :hackney.close(hackney_client)
 
         conn
         |> opts[:handler_module].resp_body_handler("", false)
@@ -202,9 +211,10 @@ defmodule Troxy.Interfaces.Plug do
     end
   end
 
+  @spec extract_url(Plug.Conn.t) :: binary
   defp extract_url(conn) do
     # TODO: fix conn.request_path for https requests is like "yahoo.com:443"
-    host = Plug.Conn.get_req_header(conn, "host") |> List.first
+    host = get_req_header(conn, "host") |> List.first
     if host == nil, do: raise(Error, "missing request host header")
 
     # Implement String.Chars protocol for URI
@@ -229,6 +239,7 @@ defmodule Troxy.Interfaces.Plug do
     end
   end
 
+  @spec extract_request_headers(Plug.Conn.t) :: Plug.Conn.headers
   defp extract_request_headers(conn) do
     # Remove Host header if requests are coming through a /endpoint
     # TODO: Add X-Forwarded-For ?? maybe as an option?
@@ -238,16 +249,16 @@ defmodule Troxy.Interfaces.Plug do
     |> Map.get(:req_headers)
   end
 
-  @spec put_resp_headers(Plug.Conn.t, [{String.t, String.t}], boolean) :: Plug.Conn.t
+  @spec put_resp_headers(Plug.Conn.t, Plug.Conn.headers, boolean) :: Plug.Conn.t
   defp put_resp_headers(conn, headers, normalize_headers?) do
     if normalize_headers? do
       put_normalized_resp_headers(conn, headers)
     else
-      # Don't downcase them (maybe the client relies on the original casing)
       put_raw_resp_headers(conn, headers)
     end
   end
 
+  @spec put_normalized_resp_headers(Plug.Conn.t, Plug.Conn.headers) :: Plug.Conn.t
   defp put_normalized_resp_headers(conn, []), do: conn
   defp put_normalized_resp_headers(conn, [{header, value} | remaining_headers]) do
     conn
@@ -255,7 +266,7 @@ defmodule Troxy.Interfaces.Plug do
     |> put_normalized_resp_headers(remaining_headers)
   end
 
-  @spec put_raw_resp_headers(Plug.Conn.t, [{String.t, String.t}]) :: Plug.Conn.t
+  @spec put_raw_resp_headers(Plug.Conn.t, Plug.Conn.headers) :: Plug.Conn.t
   defp put_raw_resp_headers(conn, headers) do
     %{conn | resp_headers: headers}
   end
