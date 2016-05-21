@@ -70,7 +70,11 @@ defmodule Troxy.Interfaces.PlugTest do
   end
 
   test "supports async POST redirects with body forwarding"
-  test "handles timeouts, :econnrefused, or :nxdomain errors"
+  test "handles timeouts, :econnrefused, or :nxdomain errors" do
+    conn = create_conn(:httparrot, :http, :get, "/delay/10")
+    |> Troxy.Interfaces.Plug.call(@opts)
+    assert conn.status == 200
+  end
 
   defp call_plug(opts) do
     create_conn
@@ -98,7 +102,6 @@ defmodule Troxy.Interfaces.PlugTest do
 # /basic-auth/:user/:passwd Challenges HTTPBasic Auth.
 # /hidden-basic-auth/:user/:passwd 404'd BasicAuth.
 # /stream/:n Streams n-100 lines.
-# /delay/:n Delays responding for n-10 seconds.
 # /html Renders an HTML Page.
 # /robots.txt Returns some robots.txt rules.
 # /deny Denied by robots.txt file.

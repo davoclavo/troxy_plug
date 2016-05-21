@@ -91,3 +91,9 @@ Similar projects
 ----
 
  - [elixir-reverse-proxy](https://github.com/slogsdon/elixir-reverse-proxy)
+
+Tests
+------
+
+In order to be able to pry, call with `iex -S` and set `--trace`
+`iex -S mix test --trace --exclude not_implemented:true test/troxy`
