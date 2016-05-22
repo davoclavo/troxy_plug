@@ -40,6 +40,7 @@ defmodule Troxy.Interfaces.Plug do
 
   @spec init(Keyword.t) :: Keyword.t
   def init(opts) do
+    Logger.debug("init!")
     Keyword.merge(@default_opts, opts)
   end
 

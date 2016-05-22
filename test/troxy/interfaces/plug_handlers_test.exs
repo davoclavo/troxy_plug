@@ -53,7 +53,7 @@ defmodule Troxy.Interfaces.PlugHandlersTest do
     connect_plug(TestPlug, [])
     assert_received({:from_resp_body_handler, {body_chunk, true}})
     assert_received({:from_resp_body_handler, {_body_chunk, false}})
-    assert body_chunk == "{\n  \"args\": {},\n  \"headers\": {\n    \"transfer-encoding\": \"chunked\",\n    \"user-agent\": \"hackney/1.4.8\",\n    \"host\": \"localhost:10080\"\n  },\n  \"url\": \"http://localhost:10080/get\",\n  \"origin\": \"127.0.0.1\"\n}"
+    assert body_chunk == "{\n  \"args\": {},\n  \"headers\": {\n    \"transfer-encoding\": \"chunked\",\n    \"user-agent\": \"hackney/1.4.10\",\n    \"host\": \"localhost:10080\"\n  },\n  \"url\": \"http://localhost:10080/get\",\n  \"origin\": \"127.0.0.1\"\n}"
   end
 
   defmodule TestIncompletePlug do
