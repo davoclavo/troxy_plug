@@ -9,14 +9,14 @@ defmodule Troxy.Server do
     http_port = Application.get_env(:troxy, :http)[:port]
     https_port = Application.get_env(:troxy, :https)[:port]
     Logger.info "Starting Troxy server at http://localhost:#{http_port} and https://localhost:#{https_port}"
-    # Plug.Adapters.Cowboy.http Troxy.Interfaces.Plug, [],
-    #     port: http_port
-    Plug.Adapters.Cowboy.https Troxy.Interfaces.Plug, [],
-        port: http_port,
-        password: "",
-        otp_app: :troxy,
-        keyfile: "priv/erl_cowboy/dummy.key",
-        certfile: "priv/erl_cowboy/dummy.crt"
+    Plug.Adapters.Cowboy.http Troxy.Interfaces.Plug, [],
+        port: http_port
+    # Plug.Adapters.Cowboy.https Troxy.Interfaces.Plug, [],
+    #     port: http_port,
+    #     password: "",
+    #     otp_app: :troxy,
+    #     keyfile: "priv/erl_cowboy/dummy.key",
+    #     certfile: "priv/erl_cowboy/dummy.crt"
 
     Logger.info "GO!"
   end
