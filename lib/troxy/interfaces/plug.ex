@@ -13,9 +13,8 @@ defmodule Troxy.Interfaces.Plug do
   @behaviour Plug
 
   import Plug.Conn
-  require IEx
   require Logger
-  # Defining the DefaultHandlers here as well in order to allow pluging without having to `use`
+  # Inject the DefaultHandlers here as well in order to allow pluging without having to `use`
   use Troxy.Interfaces.DefaultHandlers
 
   defmodule Error do
@@ -34,7 +33,8 @@ defmodule Troxy.Interfaces.Plug do
     handler_module: __MODULE__,
     normalize_headers?: true,
     follow_redirects?: false,
-    timeout: 5_000,
+    conn_timeout: 5_000,
+    resp_timeout: 30_000,
     stream?: true
   ]
 
@@ -191,7 +191,6 @@ defmodule Troxy.Interfaces.Plug do
         |> async_response_handler(opts)
       {:hackney_response, _hackney_client, body_chunk} when is_binary(body_chunk) ->
         Logger.debug "<< body chunk"
-        # Enum.into([body_chunk], conn)
         # TODO: Chunk after the handler, so the response can be modified
         {:ok, conn} = chunk(conn, body_chunk)
         conn
@@ -213,35 +212,35 @@ defmodule Troxy.Interfaces.Plug do
 
   @spec extract_url(Plug.Conn.t) :: binary
   defp extract_url(conn) do
-    # TODO: fix conn.request_path for https requests is like "yahoo.com:443"
-    host = get_req_header(conn, "host") |> List.first
-    if host == nil, do: raise(Error, "missing request host header")
+    host = case get_req_header(conn, "host") do
+             []     -> raise(Error, "missing request host header")
+             [host] -> host
+           end
 
-    # Implement String.Chars protocol for URI
-    # %URI{
-    #   host: conn.req_headers["host"],
-    # }
+    conn
+    |> conn_to_uri
+    |> Map.merge(%{host: host})
+    |> URI.to_string
+  end
 
-    # TODO: Remove this...
-    port = case conn.scheme do
-       http when http in [:http, :https] -> to_string(Application.get_env(:troxy, http)[:port])
-    end
+  @spec conn_to_uri(Plug.Conn.t) :: URI.t
+  defp conn_to_uri(conn) do
+    query = case conn.query_string do
+              ""    -> nil
+              query -> query
+            end
 
-    case host do
-      "localhost:" <> ^port ->
-        raise(Error, "upstream: can't proxy itself")
-      _ ->
-        base = to_string(conn.scheme) <> "://" <> host <> conn.request_path
-        case conn.query_string do
-            "" -> base
-            query_string -> base <> "?" <> query_string
-        end
-    end
+    %URI{
+      scheme: conn.scheme |> to_string,
+      host: conn.host,
+      port: conn.port,
+      path: conn.request_path,
+      query: query
+    }
   end
 
   @spec extract_request_headers(Plug.Conn.t) :: Plug.Conn.headers
   defp extract_request_headers(conn) do
-    # Remove Host header if requests are coming through a /endpoint
     # TODO: Add X-Forwarded-For ?? maybe as an option?
     conn
     |> delete_req_header("host")
