@@ -10,6 +10,6 @@ config :troxy,
   https: [
     port: 9943,
     password: "mypassword",
-    keyfile: "/tmp/server.key",
-    certfile: "/tmp/server.crt",
+    keyfile: "priv/erl_cowboy/dummy.key",
+    certfile: "priv/erl_cowboy/dummy.crt"
   ]

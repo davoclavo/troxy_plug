@@ -6,8 +6,8 @@ defmodule Troxy.Mixfile do
     [app: :troxy,
      version: "0.0.1",
      elixir: "~> 1.1",
-     deps: deps,
-     aliases: aliases]
+     deps: deps(),
+     aliases: aliases()]
   end
 
   # An alias to run the server
@@ -32,7 +32,7 @@ defmodule Troxy.Mixfile do
   defp deps do
     [{:cowboy, "~> 1.0"},
      {:plug, "~> 1.0"},
-     {:hackney, "~> 1.1"},
+     {:hackney, "~> 1.6"},
      {:httparrot, "~> 0.3.4", only: :test}]
   end
 end
