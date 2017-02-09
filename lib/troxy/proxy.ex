@@ -1,21 +1,33 @@
 defmodule Troxy.Proxy do
   use Plug.Builder
-  plug :rewrite_troxy_host_header
+  plug :authorize
   plug :is_alive
   use Troxy.Interfaces.Plug
 
-  def rewrite_troxy_host_header(conn, _opts) do
-    case Plug.Conn.get_req_header(conn, "x-troxy-host") do
-      [] ->
-        conn
-      [target_host] ->
-        # Added the peer to temporarily allow requests from the ui
-        %Plug.Conn{conn | host: target_host, peer: {{127,0,0,2}, 111317}}
-        |> delete_req_header("x-troxy-host")
-        |> delete_req_header("host")
-        |> put_req_header("host", target_host)
+  def authorize(conn, _opts) do
+    case Plug.Conn.get_req_header(conn, "proxy-authorization") do
+      ["Basic " <> encoded_auth] ->
+        [username, password] = Base.decode64!(encoded_auth)
+        |> String.split(":")
+        configuration = Application.fetch_env!(:troxy, :auth)
+        case {to_value(configuration[:username]), to_value(configuration[:password])} do
+          {^username, ^password} ->
+            conn
+          _ ->
+            unauthorized_request(conn)
+        end
+      _ ->
+        unauthorized_request(conn)
     end
   end
+  defp unauthorized_request(conn) do
+    conn
+    |> put_private(:plug_skip_troxy, true)
+    |> resp(401, "bad proxy auth")
+    |> halt
+  end
+  defp to_value({:system, env_var}), do: System.get_env(env_var)
+
 
   def is_alive(conn, opts) do
     if File.exists?("partition.lock") do
