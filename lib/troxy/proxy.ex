@@ -5,7 +5,7 @@ defmodule Troxy.Proxy do
   use Troxy.Interfaces.Plug
 
   def authorize(conn, _opts) do
-    case Plug.Conn.get_req_header(conn, "authorization") do
+    case Plug.Conn.get_req_header(conn, "proxy-authorization") do
       ["Basic " <> encoded_auth] ->
         [username, password] = Base.decode64!(encoded_auth)
         |> String.split(":")
@@ -13,7 +13,7 @@ defmodule Troxy.Proxy do
         case {to_value(configuration[:username]), to_value(configuration[:password])} do
           {^username, ^password} ->
             conn
-            |> Plug.Conn.delete_req_header("authorization")
+            |> Plug.Conn.delete_req_header("proxy-authorization")
           _ ->
             unauthorized_request(conn)
         end
