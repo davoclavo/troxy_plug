@@ -12,4 +12,9 @@ config :troxy,
     password: "mypassword",
     keyfile: "priv/erl_cowboy/dummy.key",
     certfile: "priv/erl_cowboy/dummy.crt"
+  ],
+  auth: [
+    username: {:system, "TROXY_USERNAME"},
+    password: {:system, "TROXY_PASSWORD"}
   ]
+
